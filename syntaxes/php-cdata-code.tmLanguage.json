@@ -1,0 +1,26 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "PHP in XML code CDATA",
+  "scopeName": "source.php-cdata-code.xml",
+  "injectionSelector": "L:text.xml",
+  "patterns": [
+    {
+      "name": "meta.embedded.php.code.xml",
+      "begin": "(?i)<(code)\\b[^>]*>",
+      "beginCaptures": {"0": {"name": "meta.tag.block.code.xml"}, "1": {"name": "entity.name.tag.localname.xml"}},
+      "end": "(?i)</(code)\\s*>",
+      "endCaptures": {"0": {"name": "meta.tag.block.code.xml"}, "1": {"name": "entity.name.tag.localname.xml"}},
+      "patterns": [
+        {
+          "name": "meta.embedded.php.cdata.xml",
+          "begin": "<!\\[CDATA\\[",
+          "beginCaptures": {"0": {"name": "keyword.declaration.cdata.xml"}},
+          "end": "\\]\\]>",
+          "endCaptures": {"0": {"name": "keyword.declaration.cdata.xml"}},
+          "contentName": "source.php",
+          "patterns": [{"include": "source.php"}]
+        }
+      ]
+    }
+  ]
+}
