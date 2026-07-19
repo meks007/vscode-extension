@@ -4,9 +4,6 @@ const vscode = require('vscode');
 // Helpers
 // ---------------------------------------------------------------------------
 
-// SymbolKind 7 = Field. XML language servers use this for attribute nodes.
-var FIELD_KIND = 7;
-
 function buildTree(symbols, uri, parent, depth) {
   parent = parent || null;
   depth  = depth  || 0;
@@ -28,8 +25,6 @@ function buildTree(symbols, uri, parent, depth) {
 function flattenTree(roots, result) {
   result = result || [];
   for (var i = 0; i < roots.length; i++) {
-    // Skip Field-kind nodes in the flat list used for cursor tracking.
-    if (roots[i].symbol.kind === FIELD_KIND) continue;
     result.push(roots[i]);
     if (roots[i].children.length) {
       flattenTree(roots[i].children, result);
@@ -38,38 +33,16 @@ function flattenTree(roots, result) {
   return result;
 }
 
-function nonFieldChildren(node) {
-  if (!node.children) return [];
-  return node.children.filter(function (c) {
-    return c.symbol.kind !== FIELD_KIND;
-  });
-}
-
 function rangeContains(range, position) {
-  if (position.line < range.start.line || position.line > range.end.line) {
-    return false;
-  }
-  if (
-    position.line === range.start.line &&
-    position.character < range.start.character
-  ) {
-    return false;
-  }
-  if (
-    position.line === range.end.line &&
-    position.character > range.end.character
-  ) {
-    return false;
-  }
+  if (position.line < range.start.line || position.line > range.end.line) return false;
+  if (position.line === range.start.line && position.character < range.start.character) return false;
+  if (position.line === range.end.line   && position.character > range.end.character)   return false;
   return true;
 }
 
 function rangeSize(range) {
   if (!range) return Infinity;
-  return (
-    (range.end.line - range.start.line) * 100000 +
-    (range.end.character - range.start.character)
-  );
+  return (range.end.line - range.start.line) * 100000 + (range.end.character - range.start.character);
 }
 
 function symbolAtPosition(flat, position) {
@@ -82,9 +55,7 @@ function symbolAtPosition(flat, position) {
         best = node;
       } else {
         var bestRange = best.symbol.range || (best.symbol.location && best.symbol.location.range);
-        if (rangeSize(range) < rangeSize(bestRange)) {
-          best = node;
-        }
+        if (rangeSize(range) < rangeSize(bestRange)) best = node;
       }
     }
   }
@@ -93,34 +64,32 @@ function symbolAtPosition(flat, position) {
 
 function kindToIcon(kind) {
   var map = {
-    0:  'symbol-file',
-    1:  'symbol-module',
-    2:  'symbol-namespace',
-    3:  'symbol-package',
-    4:  'symbol-class',
-    5:  'symbol-method',
-    6:  'symbol-property',
-    7:  'symbol-field',
-    8:  'symbol-constructor',
-    9:  'symbol-enum',
-    10: 'symbol-interface',
-    11: 'symbol-function',
-    12: 'symbol-variable',
-    13: 'symbol-constant',
-    14: 'symbol-string',
-    15: 'symbol-number',
-    16: 'symbol-boolean',
-    17: 'symbol-array',
-    18: 'symbol-object',
-    19: 'symbol-key',
-    20: 'symbol-null',
-    21: 'symbol-enum-member',
-    22: 'symbol-struct',
-    23: 'symbol-event',
-    24: 'symbol-operator',
-    25: 'symbol-type-parameter'
+    0:'symbol-file', 1:'symbol-module', 2:'symbol-namespace', 3:'symbol-package',
+    4:'symbol-class', 5:'symbol-method', 6:'symbol-property', 7:'symbol-field',
+    8:'symbol-constructor', 9:'symbol-enum', 10:'symbol-interface', 11:'symbol-function',
+    12:'symbol-variable', 13:'symbol-constant', 14:'symbol-string', 15:'symbol-number',
+    16:'symbol-boolean', 17:'symbol-array', 18:'symbol-object', 19:'symbol-key',
+    20:'symbol-null', 21:'symbol-enum-member', 22:'symbol-struct', 23:'symbol-event',
+    24:'symbol-operator', 25:'symbol-type-parameter'
   };
   return map[kind] || 'symbol-misc';
+}
+
+// ---------------------------------------------------------------------------
+// Debug: dump raw symbol tree to Output channel
+// ---------------------------------------------------------------------------
+
+function dumpSymbols(symbols, indent, lines) {
+  indent = indent || '';
+  lines  = lines  || [];
+  for (var i = 0; i < symbols.length; i++) {
+    var s = symbols[i];
+    lines.push(indent + 'name=' + s.name + ' kind=' + s.kind + ' detail=' + (s.detail || '') + ' children=' + (s.children ? s.children.length : 0));
+    if (Array.isArray(s.children) && s.children.length) {
+      dumpSymbols(s.children, indent + '  ', lines);
+    }
+  }
+  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -140,18 +109,12 @@ SmartOutlineProvider.prototype.setSymbols = function (roots, flat) {
   this._onDidChangeTreeData.fire(undefined);
 };
 
-SmartOutlineProvider.prototype.getFlat = function () {
-  return this._flat;
-};
+SmartOutlineProvider.prototype.getFlat = function () { return this._flat; };
 
 SmartOutlineProvider.prototype.getTreeItem = function (node) {
-  var sym = node.symbol;
-
-  // Base the collapsible state on non-Field children only, so that a node
-  // that has only attribute children (Fields) is shown as a leaf, not as
-  // a collapsible parent with an empty subtree.
-  var visibleChildren = nonFieldChildren(node);
-  var state = visibleChildren.length
+  var sym         = node.symbol;
+  var hasChildren = node.children && node.children.length > 0;
+  var state = hasChildren
     ? vscode.TreeItemCollapsibleState.Collapsed
     : vscode.TreeItemCollapsibleState.None;
 
@@ -167,19 +130,12 @@ SmartOutlineProvider.prototype.getTreeItem = function (node) {
       arguments: [node.uri, { selection: range }]
     };
   }
-
   return item;
 };
 
-// Filter out Field-kind children here so they never appear in the tree.
-// The original symbol tree is never modified; filtering happens only at
-// render time.
 SmartOutlineProvider.prototype.getChildren = function (node) {
-  var children = node ? node.children : this._roots;
-  if (!children) return [];
-  return children.filter(function (c) {
-    return c.symbol.kind !== FIELD_KIND;
-  });
+  if (!node) return this._roots;
+  return node.children || [];
 };
 
 SmartOutlineProvider.prototype.getParent = function (node) {
@@ -192,6 +148,7 @@ SmartOutlineProvider.prototype.getParent = function (node) {
 
 function activate(context) {
   var provider = new SmartOutlineProvider();
+  var output   = vscode.window.createOutputChannel('Smart Outline Debug');
 
   var treeView = vscode.window.createTreeView('phpSmartOutline', {
     treeDataProvider: provider,
@@ -203,23 +160,17 @@ function activate(context) {
   var selectionTimer;
 
   function clearRetries() {
-    for (var i = 0; i < retryTimers.length; i++) {
-      clearTimeout(retryTimers[i]);
-    }
+    for (var i = 0; i < retryTimers.length; i++) clearTimeout(retryTimers[i]);
     retryTimers = [];
   }
 
   function revealCurrent(editor) {
     if (!editor) return;
-    var position = editor.selection.active;
-    var flat     = provider.getFlat();
+    var flat = provider.getFlat();
     if (!flat.length) return;
-    var node = symbolAtPosition(flat, position);
+    var node = symbolAtPosition(flat, editor.selection.active);
     if (node) {
-      treeView.reveal(node, { select: true, focus: false, expand: 1 }).then(
-        undefined,
-        function () {}
-      );
+      treeView.reveal(node, { select: true, focus: false, expand: 1 }).then(undefined, function () {});
     }
   }
 
@@ -234,48 +185,40 @@ function activate(context) {
       return;
     }
 
-    vscode.commands
-      .executeCommand('vscode.executeDocumentSymbolProvider', document.uri)
-      .then(
-        function (result) {
-          if (
-            request !== generation ||
-            !vscode.window.activeTextEditor ||
-            document !== vscode.window.activeTextEditor.document
-          ) {
-            return;
+    vscode.commands.executeCommand('vscode.executeDocumentSymbolProvider', document.uri).then(
+      function (result) {
+        if (request !== generation || !vscode.window.activeTextEditor || document !== vscode.window.activeTextEditor.document) return;
+
+        var symbols = Array.isArray(result) ? result : [];
+
+        if (symbols.length === 0) {
+          if (request === generation) {
+            provider.setSymbols([], []);
+            vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
           }
-
-          var symbols = Array.isArray(result) ? result : [];
-
-          if (symbols.length === 0) {
-            if (request === generation) {
-              provider.setSymbols([], []);
-              vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
-            }
-            return;
-          }
-
-          var roots = buildTree(symbols, document.uri, null, 0);
-          var flat  = flattenTree(roots, []);
-          provider.setSymbols(roots, flat);
-
-          vscode.commands.executeCommand('workbench.action.openAuxiliaryBar').then(
-            function () {
-              vscode.commands.executeCommand('phpSmartOutline.focus').then(
-                function () { revealCurrent(vscode.window.activeTextEditor); },
-                function () {}
-              );
-            },
-            function () {}
-          );
-        },
-        function () {
-          if (request !== generation) return;
-          provider.setSymbols([], []);
-          vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
+          return;
         }
-      );
+
+        var roots = buildTree(symbols, document.uri, null, 0);
+        var flat  = flattenTree(roots, []);
+        provider.setSymbols(roots, flat);
+
+        vscode.commands.executeCommand('workbench.action.openAuxiliaryBar').then(
+          function () {
+            vscode.commands.executeCommand('phpSmartOutline.focus').then(
+              function () { revealCurrent(vscode.window.activeTextEditor); },
+              function () {}
+            );
+          },
+          function () {}
+        );
+      },
+      function () {
+        if (request !== generation) return;
+        provider.setSymbols([], []);
+        vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
+      }
+    );
   }
 
   function scheduleRefresh() {
@@ -290,23 +233,41 @@ function activate(context) {
     }
   }
 
+  // Debug command: dumps raw symbol tree to Output channel.
+  function dumpCommand() {
+    var editor   = vscode.window.activeTextEditor;
+    var document = editor && editor.document;
+    if (!document) {
+      vscode.window.showInformationMessage('No active document.');
+      return;
+    }
+    vscode.commands.executeCommand('vscode.executeDocumentSymbolProvider', document.uri).then(
+      function (result) {
+        var symbols = Array.isArray(result) ? result : [];
+        output.clear();
+        output.appendLine('--- Symbol dump for: ' + document.uri.toString());
+        output.appendLine('Total root symbols: ' + symbols.length);
+        var lines = dumpSymbols(symbols, '', []);
+        for (var i = 0; i < lines.length; i++) output.appendLine(lines[i]);
+        output.show(true);
+      },
+      function (err) {
+        output.appendLine('Error: ' + String(err));
+        output.show(true);
+      }
+    );
+  }
+
   context.subscriptions.push(
     treeView,
+    output,
     provider._onDidChangeTreeData,
 
-    vscode.window.onDidChangeActiveTextEditor(function () {
-      scheduleRefresh();
-    }),
-
-    vscode.window.onDidChangeVisibleTextEditors(function () {
-      scheduleRefresh();
-    }),
+    vscode.window.onDidChangeActiveTextEditor(function () { scheduleRefresh(); }),
+    vscode.window.onDidChangeVisibleTextEditors(function () { scheduleRefresh(); }),
 
     vscode.workspace.onDidChangeTextDocument(function (event) {
-      if (
-        vscode.window.activeTextEditor &&
-        event.document === vscode.window.activeTextEditor.document
-      ) {
+      if (vscode.window.activeTextEditor && event.document === vscode.window.activeTextEditor.document) {
         scheduleRefresh();
       }
     }),
@@ -314,14 +275,11 @@ function activate(context) {
     vscode.window.onDidChangeTextEditorSelection(function (event) {
       if (event.textEditor !== vscode.window.activeTextEditor) return;
       clearTimeout(selectionTimer);
-      selectionTimer = setTimeout(function () {
-        revealCurrent(event.textEditor);
-      }, 80);
+      selectionTimer = setTimeout(function () { revealCurrent(event.textEditor); }, 80);
     }),
 
-    vscode.commands.registerCommand('phpSmartOutline.refresh', function () {
-      scheduleRefresh();
-    }),
+    vscode.commands.registerCommand('phpSmartOutline.refresh', function () { scheduleRefresh(); }),
+    vscode.commands.registerCommand('phpSmartOutline.dumpSymbols', dumpCommand),
 
     {
       dispose: function () {
