@@ -76,7 +76,7 @@ function kindToIcon(kind) {
 }
 
 // ---------------------------------------------------------------------------
-// Debug helper: writes raw symbol tree to Output channel
+// Debug helper
 // ---------------------------------------------------------------------------
 
 function dumpSymbols(symbols, indent, lines) {
@@ -171,46 +171,31 @@ function activate(context) {
     retryTimers = [];
   }
 
-  // Reveal the symbol at the current cursor position.
-  // IMPORTANT: treeView.reveal() always forces the sidebar open (VS Code
-  // built-in behaviour, see github.com/microsoft/vscode/issues/96146).
-  // We therefore only call it when we know the view is already visible so
-  // we never accidentally reopen a sidebar the user has closed.
-  // Also, reveal() must be called AFTER the tree has been re-rendered
-  // following a setSymbols() call, so it is always invoked via a short
-  // setTimeout rather than synchronously.
+  // Reveal the symbol under the cursor.
+  //
+  // treeView.reveal() is the single correct API for this: it both selects
+  // the node in the tree AND opens/shows the view if it is not yet visible.
+  // We do NOT guard on treeView.visible here -- the previous approach of
+  // skipping reveal() when the view is not visible was the cause of the
+  // two-click problem: data updated but nothing revealed, requiring click 1
+  // to activate the view and click 2 to jump to position.
+  //
+  // The only guard we keep is: do not call reveal() when there is no node
+  // to reveal (cursor outside all symbols), because calling reveal() with
+  // null would throw.
+  //
+  // IMPORTANT: reveal() must always be called inside a setTimeout so VS Code
+  // has had time to finish re-rendering the tree after setSymbols().
+  // Calling it synchronously after _onDidChangeTreeData.fire() causes a
+  // "Data tree node not found" error (github.com/microsoft/vscode/issues/96089).
   function revealCurrent(editor) {
     if (!editor) return;
-    if (!treeView.visible) return;
     var flat = provider.getFlat();
     if (!flat.length) return;
     var node = symbolAtPosition(flat, editor.selection.active);
-    if (node) {
-      treeView.reveal(node, { select: true, focus: false, expand: 2 })
-        .then(undefined, function () {});
-    }
-  }
-
-  // Open the bar and focus our view, then reveal the current symbol once
-  // the tree has had time to render the new data.
-  function openAndReveal(editor) {
-    vscode.commands.executeCommand('workbench.action.openAuxiliaryBar').then(
-      function () {
-        vscode.commands.executeCommand('phpSmartOutline.focus').then(
-          function () {
-            // Delay the reveal so the tree has finished rendering the newly
-            // set symbols. Calling reveal() immediately after fire() causes
-            // "Data tree node not found" (github.com/microsoft/vscode/issues/96089).
-            clearTimeout(revealTimer);
-            revealTimer = setTimeout(function () {
-              revealCurrent(editor || vscode.window.activeTextEditor);
-            }, 150);
-          },
-          function () {}
-        );
-      },
-      function () {}
-    );
+    if (!node) return;
+    treeView.reveal(node, { select: true, focus: false, expand: 2 })
+      .then(undefined, function () {});
   }
 
   function refreshSymbols(request, attemptIndex) {
@@ -237,8 +222,8 @@ function activate(context) {
         var symbols = Array.isArray(result) ? result : [];
 
         if (symbols.length === 0) {
-          // Do not close the bar on early retries: the language server may
-          // still be loading symbols. Only act on the last attempt.
+          // Do not close the bar on early retries -- the language server may
+          // still be loading. Only close after all retries are exhausted.
           if (isLast) {
             provider.setSymbols([], []);
             vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
@@ -250,21 +235,14 @@ function activate(context) {
         var flat  = flattenTree(roots, []);
         provider.setSymbols(roots, flat);
 
-        // If the sidebar is already showing our view, just reveal the
-        // current symbol after giving the tree time to re-render.
-        // If it is not visible, open it and then reveal.
-        // We intentionally re-check treeView.visible here (after
-        // setSymbols) rather than caching it before, because the
-        // onDidChangeActiveTextEditor event fires before VS Code has
-        // finished updating the panel state.
-        if (treeView.visible) {
-          clearTimeout(revealTimer);
-          revealTimer = setTimeout(function () {
-            revealCurrent(vscode.window.activeTextEditor);
-          }, 150);
-        } else {
-          openAndReveal(vscode.window.activeTextEditor);
-        }
+        // Defer the reveal so VS Code has time to finish re-rendering the
+        // tree nodes after the _onDidChangeTreeData event fires.
+        // treeView.reveal() handles both the "bar is open" and "bar is closed"
+        // cases -- no manual openAuxiliaryBar call needed.
+        clearTimeout(revealTimer);
+        revealTimer = setTimeout(function () {
+          revealCurrent(vscode.window.activeTextEditor);
+        }, 150);
       },
       function () {
         if (request !== generation) return;
