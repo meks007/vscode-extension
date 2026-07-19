@@ -1,8 +1,8 @@
 {
   "name": "php-cdata-code-blocks",
   "displayName": "PHP in XML Code CDATA",
-  "description": "Syntax highlighting for untagged PHP inside <code><![CDATA[ ... ]]></code> blocks in XML documents.",
-  "version": "0.3.0",
+  "description": "Syntax highlighting for untagged PHP inside <code><![CDATA[ ... ]]></code> blocks in XML documents, with automatic PHP Outline focus.",
+  "version": "0.4.0",
   "publisher": "hueck-folien",
   "license": "MIT",
   "main": "./extension.js",
@@ -10,8 +10,8 @@
     "vscode": "^1.85.0"
   },
   "categories": ["Programming Languages"],
-  "keywords": ["xml", "php", "cdata", "syntax highlighting"],
-  "activationEvents": [],
+  "keywords": ["xml", "php", "cdata", "syntax highlighting", "outline"],
+  "activationEvents": ["onStartupFinished", "onLanguage:php"],
   "contributes": {
     "grammars": [
       {
