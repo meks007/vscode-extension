@@ -6,58 +6,45 @@ const vscode = require('vscode');
 
 var SYMBOL_KIND_FIELD = 7;
 
-// Separate Field-kind children (XML attributes) from element children.
-// Field children are folded into the parent label; element children become
-// tree nodes as normal.
-function splitChildren(sym) {
-  var fields   = [];
-  var elements = [];
+function buildLabel(sym) {
+  var name   = sym.name || '(unnamed)';
+  var fields = [];
+
   if (Array.isArray(sym.children)) {
     for (var i = 0; i < sym.children.length; i++) {
       if (sym.children[i].kind === SYMBOL_KIND_FIELD) {
-        fields.push(sym.children[i]);
-      } else {
-        elements.push(sym.children[i]);
+        var attrName = sym.children[i].name.replace(/^@/, '');
+        var attrVal  = sym.children[i].detail;
+        fields.push(attrVal ? attrName + '=' + attrVal : attrName);
       }
     }
   }
-  return { fields: fields, elements: elements };
-}
 
-function buildLabel(sym) {
-  var name  = sym.name || '(unnamed)';
-  var split = splitChildren(sym);
-
-  if (split.fields.length === 0) {
-    return name;
-  }
-
-  var attrs = split.fields.map(function (f) {
-    var attrName = f.name.replace(/^@/, '');
-    return f.detail ? attrName + '=' + f.detail : attrName;
-  });
-
-  return name + ' [' + attrs.join(', ') + ']';
+  if (fields.length === 0) return name;
+  return name + ' [' + fields.join(', ') + ']';
 }
 
 function buildTree(symbols, uri, parent, depth) {
   parent = parent || null;
   depth  = depth  || 0;
   return symbols.map(function (sym) {
-    var label = buildLabel(sym);
-    var node  = {
+    var node = {
       symbol:   sym,
-      label:    label,
+      label:    buildLabel(sym),
       uri:      uri,
       parent:   parent,
       children: [],
       depth:    depth
     };
 
-    // Only recurse into non-Field children (actual child elements).
-    var split = splitChildren(sym);
-    if (split.elements.length) {
-      node.children = buildTree(split.elements, uri, node, depth + 1);
+    // Recurse into non-Field children only (skip attribute nodes).
+    if (Array.isArray(sym.children) && sym.children.length) {
+      var elementChildren = sym.children.filter(function (c) {
+        return c.kind !== SYMBOL_KIND_FIELD;
+      });
+      if (elementChildren.length) {
+        node.children = buildTree(elementChildren, uri, node, depth + 1);
+      }
     }
 
     return node;
@@ -178,7 +165,7 @@ SmartOutlineProvider.prototype.getTreeItem = function (node) {
   var sym         = node.symbol;
   var hasChildren = node.children && node.children.length > 0;
 
-  // All nodes start collapsed. reveal() expands parents on demand.
+  // All nodes start collapsed. reveal() expands ancestors on demand.
   var state = hasChildren
     ? vscode.TreeItemCollapsibleState.Collapsed
     : vscode.TreeItemCollapsibleState.None;
@@ -187,12 +174,15 @@ SmartOutlineProvider.prototype.getTreeItem = function (node) {
   item.tooltip  = node.label;
   item.iconPath = new vscode.ThemeIcon(kindToIcon(sym.kind));
 
-  var range = sym.selectionRange || sym.range || (sym.location && sym.location.range);
-  if (range && node.uri) {
-    item.command = {
+  // Jump to the start of the symbol without selecting the full block.
+  var symRange = sym.selectionRange || sym.range || (sym.location && sym.location.range);
+  if (symRange && node.uri) {
+    var startPos  = new vscode.Position(symRange.start.line, symRange.start.character);
+    var jumpRange = new vscode.Range(startPos, startPos);
+    item.command  = {
       command:   'vscode.open',
       title:     'Go to symbol',
-      arguments: [node.uri, { selection: range }]
+      arguments: [node.uri, { selection: jumpRange }]
     };
   }
 
