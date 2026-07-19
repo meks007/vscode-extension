@@ -76,7 +76,7 @@ function kindToIcon(kind) {
 }
 
 // ---------------------------------------------------------------------------
-// Debug: dump raw symbol tree to Output channel
+// Debug helper: writes raw symbol tree to Output channel
 // ---------------------------------------------------------------------------
 
 function dumpSymbols(symbols, indent, lines) {
@@ -84,7 +84,13 @@ function dumpSymbols(symbols, indent, lines) {
   lines  = lines  || [];
   for (var i = 0; i < symbols.length; i++) {
     var s = symbols[i];
-    lines.push(indent + 'name=' + s.name + ' kind=' + s.kind + ' detail=' + (s.detail || '') + ' children=' + (s.children ? s.children.length : 0));
+    lines.push(
+      indent +
+      'name=' + s.name +
+      ' kind=' + s.kind +
+      ' detail=' + (s.detail || '') +
+      ' children=' + (Array.isArray(s.children) ? s.children.length : 0)
+    );
     if (Array.isArray(s.children) && s.children.length) {
       dumpSymbols(s.children, indent + '  ', lines);
     }
@@ -233,31 +239,6 @@ function activate(context) {
     }
   }
 
-  // Debug command: dumps raw symbol tree to Output channel.
-  function dumpCommand() {
-    var editor   = vscode.window.activeTextEditor;
-    var document = editor && editor.document;
-    if (!document) {
-      vscode.window.showInformationMessage('No active document.');
-      return;
-    }
-    vscode.commands.executeCommand('vscode.executeDocumentSymbolProvider', document.uri).then(
-      function (result) {
-        var symbols = Array.isArray(result) ? result : [];
-        output.clear();
-        output.appendLine('--- Symbol dump for: ' + document.uri.toString());
-        output.appendLine('Total root symbols: ' + symbols.length);
-        var lines = dumpSymbols(symbols, '', []);
-        for (var i = 0; i < lines.length; i++) output.appendLine(lines[i]);
-        output.show(true);
-      },
-      function (err) {
-        output.appendLine('Error: ' + String(err));
-        output.show(true);
-      }
-    );
-  }
-
   context.subscriptions.push(
     treeView,
     output,
@@ -279,7 +260,30 @@ function activate(context) {
     }),
 
     vscode.commands.registerCommand('phpSmartOutline.refresh', function () { scheduleRefresh(); }),
-    vscode.commands.registerCommand('phpSmartOutline.dumpSymbols', dumpCommand),
+
+    vscode.commands.registerCommand('phpSmartOutline.dumpSymbols', function () {
+      var editor   = vscode.window.activeTextEditor;
+      var document = editor && editor.document;
+      if (!document) {
+        vscode.window.showInformationMessage('No active document.');
+        return;
+      }
+      vscode.commands.executeCommand('vscode.executeDocumentSymbolProvider', document.uri).then(
+        function (result) {
+          var symbols = Array.isArray(result) ? result : [];
+          output.clear();
+          output.appendLine('--- Symbol dump: ' + document.uri.toString());
+          output.appendLine('Root count: ' + symbols.length);
+          var lines = dumpSymbols(symbols, '', []);
+          for (var i = 0; i < lines.length; i++) output.appendLine(lines[i]);
+          output.show(true);
+        },
+        function (err) {
+          output.appendLine('Error: ' + String(err));
+          output.show(true);
+        }
+      );
+    }),
 
     {
       dispose: function () {
