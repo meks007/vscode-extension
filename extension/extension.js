@@ -4,36 +4,15 @@ const vscode = require('vscode');
 // Helpers
 // ---------------------------------------------------------------------------
 
-var SYMBOL_KIND_FIELD = 7;
-
-// Build a node tree from DocumentSymbols.
-// Field-kind children (XML attributes) are stripped from the tree entirely;
-// all other children are recursed into normally.
-function buildTree(symbols, uri, parent, depth) {
+function buildTree(symbols, uri, parent) {
   parent = parent || null;
-  depth  = depth  || 0;
-  var nodes = [];
-  for (var i = 0; i < symbols.length; i++) {
-    var sym = symbols[i];
-
-    // Skip attribute nodes at every level.
-    if (sym.kind === SYMBOL_KIND_FIELD) continue;
-
-    var node = {
-      symbol:   sym,
-      uri:      uri,
-      parent:   parent,
-      children: [],
-      depth:    depth
-    };
-
+  return symbols.map(function (sym) {
+    var node = { symbol: sym, uri: uri, parent: parent, children: [] };
     if (Array.isArray(sym.children) && sym.children.length) {
-      node.children = buildTree(sym.children, uri, node, depth + 1);
+      node.children = buildTree(sym.children, uri, node);
     }
-
-    nodes.push(node);
-  }
-  return nodes;
+    return node;
+  });
 }
 
 function flattenTree(roots, result) {
@@ -77,7 +56,7 @@ function rangeSize(range) {
 function symbolAtPosition(flat, position) {
   var best = null;
   for (var i = 0; i < flat.length; i++) {
-    var node  = flat[i];
+    var node = flat[i];
     var range = node.symbol.range || (node.symbol.location && node.symbol.location.range);
     if (range && rangeContains(range, position)) {
       if (!best) {
@@ -131,14 +110,14 @@ function kindToIcon(kind) {
 
 function SmartOutlineProvider() {
   this._onDidChangeTreeData = new vscode.EventEmitter();
-  this.onDidChangeTreeData  = this._onDidChangeTreeData.event;
+  this.onDidChangeTreeData = this._onDidChangeTreeData.event;
   this._roots = [];
-  this._flat  = [];
+  this._flat = [];
 }
 
 SmartOutlineProvider.prototype.setSymbols = function (roots, flat) {
   this._roots = roots;
-  this._flat  = flat;
+  this._flat = flat;
   this._onDidChangeTreeData.fire(undefined);
 };
 
@@ -147,29 +126,23 @@ SmartOutlineProvider.prototype.getFlat = function () {
 };
 
 SmartOutlineProvider.prototype.getTreeItem = function (node) {
-  var sym         = node.symbol;
+  var sym = node.symbol;
   var hasChildren = node.children && node.children.length > 0;
-
-  // Root-level nodes (depth 0) start collapsed so the first level is visible
-  // but not yet expanded. Deeper nodes are also collapsed; reveal() expands
-  // ancestors on demand when following the cursor.
   var state = hasChildren
-    ? vscode.TreeItemCollapsibleState.Collapsed
+    ? vscode.TreeItemCollapsibleState.Expanded
     : vscode.TreeItemCollapsibleState.None;
 
-  var item      = new vscode.TreeItem(sym.name || '(unnamed)', state);
-  item.tooltip  = sym.detail || sym.name;
+  var item = new vscode.TreeItem(sym.name || '(unnamed)', state);
+  item.description = sym.detail || undefined;
+  item.tooltip = sym.detail || sym.name;
   item.iconPath = new vscode.ThemeIcon(kindToIcon(sym.kind));
 
-  // Jump to the start of the symbol without selecting the full block.
-  var symRange = sym.selectionRange || sym.range || (sym.location && sym.location.range);
-  if (symRange && node.uri) {
-    var startPos  = new vscode.Position(symRange.start.line, symRange.start.character);
-    var jumpRange = new vscode.Range(startPos, startPos);
-    item.command  = {
-      command:   'vscode.open',
-      title:     'Go to symbol',
-      arguments: [node.uri, { selection: jumpRange }]
+  var range = sym.selectionRange || sym.range || (sym.location && sym.location.range);
+  if (range && node.uri) {
+    item.command = {
+      command: 'vscode.open',
+      title: 'Go to symbol',
+      arguments: [node.uri, { selection: range }]
     };
   }
 
@@ -194,10 +167,10 @@ function activate(context) {
 
   var treeView = vscode.window.createTreeView('phpSmartOutline', {
     treeDataProvider: provider,
-    showCollapseAll:  true
+    showCollapseAll: true
   });
 
-  var generation  = 0;
+  var generation = 0;
   var retryTimers = [];
   var selectionTimer;
 
@@ -211,11 +184,11 @@ function activate(context) {
   function revealCurrent(editor) {
     if (!editor) return;
     var position = editor.selection.active;
-    var flat     = provider.getFlat();
+    var flat = provider.getFlat();
     if (!flat.length) return;
     var node = symbolAtPosition(flat, position);
     if (node) {
-      treeView.reveal(node, { select: true, focus: false, expand: 1 }).then(
+      treeView.reveal(node, { select: true, focus: false, expand: true }).then(
         undefined,
         function () {}
       );
@@ -223,9 +196,10 @@ function activate(context) {
   }
 
   function refreshSymbols(request) {
-    var editor   = vscode.window.activeTextEditor;
+    var editor = vscode.window.activeTextEditor;
     var document = editor && editor.document;
 
+    // No active editor or untitled empty buffer: close sidebar.
     if (!document) {
       if (request !== generation) return;
       provider.setSymbols([], []);
@@ -248,6 +222,8 @@ function activate(context) {
           var symbols = Array.isArray(result) ? result : [];
 
           if (symbols.length === 0) {
+            // Only update if this is the last retry so we do not flicker
+            // closed during language server startup.
             if (request === generation) {
               provider.setSymbols([], []);
               vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
@@ -255,8 +231,8 @@ function activate(context) {
             return;
           }
 
-          var roots = buildTree(symbols, document.uri, null, 0);
-          var flat  = flattenTree(roots, []);
+          var roots = buildTree(symbols, document.uri, null);
+          var flat = flattenTree(roots, []);
           provider.setSymbols(roots, flat);
 
           vscode.commands.executeCommand('workbench.action.openAuxiliaryBar').then(
@@ -280,7 +256,7 @@ function activate(context) {
   function scheduleRefresh() {
     clearRetries();
     var request = ++generation;
-    var delays  = [0, 200, 600, 1400, 3000];
+    var delays = [0, 200, 600, 1400, 3000];
     for (var i = 0; i < delays.length; i++) {
       (function (d) {
         var t = setTimeout(function () { refreshSymbols(request); }, d);
@@ -294,10 +270,6 @@ function activate(context) {
     provider._onDidChangeTreeData,
 
     vscode.window.onDidChangeActiveTextEditor(function () {
-      scheduleRefresh();
-    }),
-
-    vscode.window.onDidChangeVisibleTextEditors(function () {
       scheduleRefresh();
     }),
 
