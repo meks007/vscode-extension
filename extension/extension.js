@@ -67,7 +67,7 @@ function activate(context) {
     showCollapseAll: true
   });
 
-  let sequence = 0;
+  let generation = 0;
   let retryTimers = [];
 
   async function setVisible(visible) {
@@ -85,13 +85,14 @@ function activate(context) {
     retryTimers = [];
   }
 
-  async function refresh() {
+  async function querySymbols(request) {
     const document = vscode.window.activeTextEditor?.document;
-    const request = ++sequence;
 
     if (!document || (document.isUntitled && document.getText().length === 0)) {
-      provider.setSymbols([]);
-      await setVisible(false);
+      if (request === generation) {
+        provider.setSymbols([]);
+        await setVisible(false);
+      }
       return false;
     }
 
@@ -101,7 +102,9 @@ function activate(context) {
         document.uri
       );
 
-      if (request !== sequence) return false;
+      if (request !== generation || document !== vscode.window.activeTextEditor?.document) {
+        return false;
+      }
 
       const symbols = (result || [])
         .map((symbol) => normalizeSymbol(symbol, document.uri))
@@ -111,29 +114,30 @@ function activate(context) {
       await setVisible(symbols.length > 0);
       return symbols.length > 0;
     } catch {
-      if (request !== sequence) return false;
-      provider.setSymbols([]);
-      await setVisible(false);
+      if (request === generation) {
+        provider.setSymbols([]);
+        await setVisible(false);
+      }
       return false;
     }
   }
 
   function scheduleRefresh() {
     clearRetries();
-    const request = ++sequence;
+    const request = ++generation;
 
-    Promise.resolve().then(async () => {
-      if (request !== sequence) return;
-      await refresh();
-    });
+    void querySymbols(request);
 
     for (const delay of [150, 500, 1200, 2500]) {
-      const timer = setTimeout(async () => {
-        if (request !== sequence) return;
-        await refresh();
+      const timer = setTimeout(() => {
+        void querySymbols(request);
       }, delay);
       retryTimers.push(timer);
     }
+  }
+
+  async function refresh() {
+    scheduleRefresh();
   }
 
   context.subscriptions.push(
@@ -151,7 +155,7 @@ function activate(context) {
     { dispose: clearRetries }
   );
 
-  setVisible(false).then(scheduleRefresh);
+  void setVisible(false).then(scheduleRefresh);
 }
 
 function deactivate() {}
