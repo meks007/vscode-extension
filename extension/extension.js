@@ -4,6 +4,9 @@ const vscode = require('vscode');
 // Helpers
 // ---------------------------------------------------------------------------
 
+// SymbolKind 7 = Field. XML language servers use this for attribute nodes.
+var FIELD_KIND = 7;
+
 function buildTree(symbols, uri, parent, depth) {
   parent = parent || null;
   depth  = depth  || 0;
@@ -25,12 +28,21 @@ function buildTree(symbols, uri, parent, depth) {
 function flattenTree(roots, result) {
   result = result || [];
   for (var i = 0; i < roots.length; i++) {
+    // Skip Field-kind nodes in the flat list used for cursor tracking.
+    if (roots[i].symbol.kind === FIELD_KIND) continue;
     result.push(roots[i]);
     if (roots[i].children.length) {
       flattenTree(roots[i].children, result);
     }
   }
   return result;
+}
+
+function nonFieldChildren(node) {
+  if (!node.children) return [];
+  return node.children.filter(function (c) {
+    return c.symbol.kind !== FIELD_KIND;
+  });
 }
 
 function rangeContains(range, position) {
@@ -133,12 +145,13 @@ SmartOutlineProvider.prototype.getFlat = function () {
 };
 
 SmartOutlineProvider.prototype.getTreeItem = function (node) {
-  var sym         = node.symbol;
-  var hasChildren = node.children && node.children.length > 0;
+  var sym = node.symbol;
 
-  // All nodes with children start collapsed. The first level is visible but
-  // closed. reveal() expands ancestors on demand when following the cursor.
-  var state = hasChildren
+  // Base the collapsible state on non-Field children only, so that a node
+  // that has only attribute children (Fields) is shown as a leaf, not as
+  // a collapsible parent with an empty subtree.
+  var visibleChildren = nonFieldChildren(node);
+  var state = visibleChildren.length
     ? vscode.TreeItemCollapsibleState.Collapsed
     : vscode.TreeItemCollapsibleState.None;
 
@@ -158,9 +171,15 @@ SmartOutlineProvider.prototype.getTreeItem = function (node) {
   return item;
 };
 
+// Filter out Field-kind children here so they never appear in the tree.
+// The original symbol tree is never modified; filtering happens only at
+// render time.
 SmartOutlineProvider.prototype.getChildren = function (node) {
-  if (!node) return this._roots;
-  return node.children || [];
+  var children = node ? node.children : this._roots;
+  if (!children) return [];
+  return children.filter(function (c) {
+    return c.symbol.kind !== FIELD_KIND;
+  });
 };
 
 SmartOutlineProvider.prototype.getParent = function (node) {
