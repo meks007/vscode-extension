@@ -1,8 +1,8 @@
 {
   "name": "php-cdata-code-blocks",
   "displayName": "PHP in XML Code CDATA",
-  "description": "Syntax highlighting for PHP inside XML CDATA blocks, plus a Smart Outline with follow-cursor for PHP files.",
-  "version": "0.5.0",
+  "description": "Syntax highlighting for PHP inside XML CDATA blocks, plus a Smart Outline with follow-cursor for any file that has symbols.",
+  "version": "0.6.0",
   "publisher": "hueck-folien",
   "license": "MIT",
   "main": "./extension.js",
@@ -11,7 +11,7 @@
   },
   "categories": ["Programming Languages"],
   "keywords": ["xml", "php", "cdata", "syntax highlighting", "outline"],
-  "activationEvents": ["onStartupFinished", "onLanguage:php"],
+  "activationEvents": ["onStartupFinished"],
   "contributes": {
     "grammars": [
       {
