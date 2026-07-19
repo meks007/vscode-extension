@@ -36,6 +36,14 @@ class SmartOutlineProvider {
   }
 }
 
+function normalizeDocumentSymbol(symbol, uri) {
+  return {
+    ...symbol,
+    uri,
+    children: (symbol.children || []).map((child) => normalizeDocumentSymbol(child, uri))
+  };
+}
+
 function normalizeSymbol(symbol, uri) {
   if (!symbol) return null;
 
@@ -44,11 +52,12 @@ function normalizeSymbol(symbol, uri) {
       ...symbol,
       uri: symbol.location.uri,
       range: symbol.location.range,
-      selectionRange: symbol.location.range
+      selectionRange: symbol.location.range,
+      children: []
     };
   }
 
-  return { ...symbol, uri };
+  return normalizeDocumentSymbol(symbol, uri);
 }
 
 function activate(context) {
@@ -57,8 +66,24 @@ function activate(context) {
     treeDataProvider: provider,
     showCollapseAll: true
   });
+
   let sequence = 0;
-  let timer;
+  let retryTimers = [];
+
+  async function setVisible(visible) {
+    await vscode.commands.executeCommand(
+      'setContext',
+      'phpCdataSmartOutline.hasSymbols',
+      visible
+    );
+  }
+
+  function clearRetries() {
+    for (const timer of retryTimers) {
+      clearTimeout(timer);
+    }
+    retryTimers = [];
+  }
 
   async function refresh() {
     const document = vscode.window.activeTextEditor?.document;
@@ -66,8 +91,8 @@ function activate(context) {
 
     if (!document || (document.isUntitled && document.getText().length === 0)) {
       provider.setSymbols([]);
-      await vscode.commands.executeCommand('setContext', 'phpCdataSmartOutline.hasSymbols', false);
-      return;
+      await setVisible(false);
+      return false;
     }
 
     try {
@@ -76,43 +101,57 @@ function activate(context) {
         document.uri
       );
 
-      if (request !== sequence) return;
+      if (request !== sequence) return false;
 
       const symbols = (result || [])
         .map((symbol) => normalizeSymbol(symbol, document.uri))
         .filter(Boolean);
 
       provider.setSymbols(symbols);
-      await vscode.commands.executeCommand(
-        'setContext',
-        'phpCdataSmartOutline.hasSymbols',
-        symbols.length > 0
-      );
+      await setVisible(symbols.length > 0);
+      return symbols.length > 0;
     } catch {
-      if (request !== sequence) return;
+      if (request !== sequence) return false;
       provider.setSymbols([]);
-      await vscode.commands.executeCommand('setContext', 'phpCdataSmartOutline.hasSymbols', false);
+      await setVisible(false);
+      return false;
     }
   }
 
   function scheduleRefresh() {
-    clearTimeout(timer);
-    timer = setTimeout(refresh, 160);
+    clearRetries();
+    const request = ++sequence;
+
+    Promise.resolve().then(async () => {
+      if (request !== sequence) return;
+      await refresh();
+    });
+
+    for (const delay of [150, 500, 1200, 2500]) {
+      const timer = setTimeout(async () => {
+        if (request !== sequence) return;
+        await refresh();
+      }, delay);
+      retryTimers.push(timer);
+    }
   }
 
   context.subscriptions.push(
     tree,
     provider._onDidChangeTreeData,
     vscode.window.onDidChangeActiveTextEditor(scheduleRefresh),
+    vscode.window.onDidChangeVisibleTextEditors(scheduleRefresh),
+    vscode.workspace.onDidOpenTextDocument(scheduleRefresh),
     vscode.workspace.onDidChangeTextDocument((event) => {
       if (event.document === vscode.window.activeTextEditor?.document) {
         scheduleRefresh();
       }
     }),
-    vscode.commands.registerCommand('phpCdataSmartOutline.refresh', refresh)
+    vscode.commands.registerCommand('phpCdataSmartOutline.refresh', refresh),
+    { dispose: clearRetries }
   );
 
-  scheduleRefresh();
+  setVisible(false).then(scheduleRefresh);
 }
 
 function deactivate() {}
