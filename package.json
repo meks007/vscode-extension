@@ -1,0 +1,50 @@
+{
+  "name": "php-cdata-code-blocks",
+  "displayName": "PHP in XML Code CDATA",
+  "description": "Syntax highlighting for untagged PHP inside <code><![CDATA[ ... ]]></code> blocks in XML documents, plus a conditional Smart Outline.",
+  "version": "0.2.0",
+  "publisher": "hueck-folien",
+  "license": "MIT",
+  "main": "./extension.js",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Programming Languages"],
+  "keywords": ["xml", "php", "cdata", "syntax highlighting", "outline"],
+  "extensionDependencies": ["vscode.php-language-features"],
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "grammars": [
+      {
+        "scopeName": "source.php-cdata-code.xml",
+        "path": "./syntaxes/php-cdata-code.tmLanguage.json",
+        "injectTo": ["text.xml"],
+        "embeddedLanguages": {"source.php": "php"}
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "phpCdataSmartOutline",
+          "name": "Smart Outline",
+          "when": "phpCdataSmartOutline.hasSymbols"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "phpCdataSmartOutline.refresh",
+        "title": "Smart Outline: Refresh"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "phpCdataSmartOutline.refresh",
+          "when": "view == phpCdataSmartOutline",
+          "group": "navigation"
+        }
+      ]
+    }
+  }
+}
