@@ -199,7 +199,8 @@ function activate(context) {
     var editor = vscode.window.activeTextEditor;
     var document = editor && editor.document;
 
-    if (!document || document.languageId !== 'php') {
+    // No active editor or untitled empty buffer: close sidebar.
+    if (!document) {
       if (request !== generation) return;
       provider.setSymbols([], []);
       vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
@@ -212,6 +213,7 @@ function activate(context) {
         function (result) {
           if (
             request !== generation ||
+            !vscode.window.activeTextEditor ||
             document !== vscode.window.activeTextEditor.document
           ) {
             return;
@@ -220,8 +222,12 @@ function activate(context) {
           var symbols = Array.isArray(result) ? result : [];
 
           if (symbols.length === 0) {
-            provider.setSymbols([], []);
-            vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
+            // Only update if this is the last retry so we do not flicker
+            // closed during language server startup.
+            if (request === generation) {
+              provider.setSymbols([], []);
+              vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
+            }
             return;
           }
 
@@ -229,8 +235,13 @@ function activate(context) {
           var flat = flattenTree(roots, []);
           provider.setSymbols(roots, flat);
 
-          vscode.commands.executeCommand('phpSmartOutline.focus').then(
-            function () { revealCurrent(vscode.window.activeTextEditor); },
+          vscode.commands.executeCommand('workbench.action.openAuxiliaryBar').then(
+            function () {
+              vscode.commands.executeCommand('phpSmartOutline.focus').then(
+                function () { revealCurrent(vscode.window.activeTextEditor); },
+                function () {}
+              );
+            },
             function () {}
           );
         },
