@@ -2,7 +2,7 @@
   "name": "php-cdata-code-blocks",
   "displayName": "PHP in XML Code CDATA",
   "description": "Syntax highlighting for PHP inside XML CDATA blocks, plus a Smart Outline with follow-cursor for any file that has symbols.",
-  "version": "0.6.0",
+  "version": "0.8.0",
   "publisher": "hueck-folien",
   "license": "MIT",
   "main": "./extension.js",
@@ -38,6 +38,10 @@
       {
         "command": "phpSmartOutline.focus",
         "title": "Smart Outline: Focus"
+      },
+      {
+        "command": "phpSmartOutline.dumpSymbols",
+        "title": "Smart Outline: Dump Symbol Tree (Debug)"
       }
     ],
     "menus": {
