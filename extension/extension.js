@@ -1,18 +1,24 @@
 const vscode = require('vscode');
 
 function activate(context) {
-  let requestId = 0;
-  let refreshTimer;
+  let generation = 0;
+  let retryTimers = [];
   let lastDocumentUri;
   let lastHasSymbols;
 
-  async function updateOutline() {
-    const request = ++requestId;
+  function clearRetries() {
+    for (const timer of retryTimers) {
+      clearTimeout(timer);
+    }
+    retryTimers = [];
+  }
+
+  async function updateOutline(request) {
     const editor = vscode.window.activeTextEditor;
     const document = editor?.document;
 
     if (!document || document.languageId !== 'php') {
-      if (request !== requestId) return;
+      if (request !== generation) return;
       lastDocumentUri = undefined;
       lastHasSymbols = undefined;
       await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
@@ -26,7 +32,7 @@ function activate(context) {
       );
 
       if (
-        request !== requestId ||
+        request !== generation ||
         document !== vscode.window.activeTextEditor?.document
       ) {
         return;
@@ -42,25 +48,27 @@ function activate(context) {
       if (hasSymbols && (documentChanged || stateChanged)) {
         await vscode.commands.executeCommand('outline.focus');
       } else if (!hasSymbols && (documentChanged || stateChanged)) {
-        await vscode.commands.executeCommand(
-          'workbench.action.closeAuxiliaryBar'
-        );
+        await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
       }
     } catch {
-      if (request !== requestId) return;
+      if (request !== generation) return;
       lastDocumentUri = document.uri.toString();
       lastHasSymbols = false;
-      await vscode.commands.executeCommand(
-        'workbench.action.closeAuxiliaryBar'
-      );
+      await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
     }
   }
 
   function scheduleUpdate() {
-    clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => {
-      void updateOutline();
-    }, 150);
+    clearRetries();
+    const request = ++generation;
+    const delays = [0, 150, 500, 1200, 2500];
+
+    for (const delay of delays) {
+      const timer = setTimeout(() => {
+        void updateOutline(request);
+      }, delay);
+      retryTimers.push(timer);
+    }
   }
 
   context.subscriptions.push(
@@ -76,8 +84,8 @@ function activate(context) {
     }),
     {
       dispose() {
-        clearTimeout(refreshTimer);
-        requestId++;
+        clearRetries();
+        generation++;
       }
     }
   );
