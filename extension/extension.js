@@ -180,7 +180,12 @@ function activate(context) {
     }
   }
 
-  function refreshSymbols(request) {
+  // attemptIndex tracks which retry this is (0 = first, last = close bar if still empty)
+  function refreshSymbols(request, attemptIndex) {
+    attemptIndex = attemptIndex || 0;
+    var delays = [0, 200, 600, 1400, 3000];
+    var isLast = (attemptIndex === delays.length - 1);
+
     var editor   = vscode.window.activeTextEditor;
     var document = editor && editor.document;
 
@@ -198,7 +203,10 @@ function activate(context) {
         var symbols = Array.isArray(result) ? result : [];
 
         if (symbols.length === 0) {
-          if (request === generation) {
+          // Do not close the bar on early retries - the language server may
+          // still be loading symbols for the newly activated document.
+          // Only close once all retries are exhausted.
+          if (isLast) {
             provider.setSymbols([], []);
             vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
           }
@@ -209,20 +217,29 @@ function activate(context) {
         var flat  = flattenTree(roots, []);
         provider.setSymbols(roots, flat);
 
-        vscode.commands.executeCommand('workbench.action.openAuxiliaryBar').then(
-          function () {
-            vscode.commands.executeCommand('phpSmartOutline.focus').then(
-              function () { revealCurrent(vscode.window.activeTextEditor); },
-              function () {}
-            );
-          },
-          function () {}
-        );
+        // Only open and focus the bar when it is not already visible.
+        // Calling openAuxiliaryBar + focus on every editor switch causes a
+        // focus-steal that makes the sidebar appear to hide and reappear.
+        if (!treeView.visible) {
+          vscode.commands.executeCommand('workbench.action.openAuxiliaryBar').then(
+            function () {
+              vscode.commands.executeCommand('phpSmartOutline.focus').then(
+                function () { revealCurrent(vscode.window.activeTextEditor); },
+                function () {}
+              );
+            },
+            function () {}
+          );
+        } else {
+          revealCurrent(vscode.window.activeTextEditor);
+        }
       },
       function () {
         if (request !== generation) return;
-        provider.setSymbols([], []);
-        vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
+        if (isLast) {
+          provider.setSymbols([], []);
+          vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
+        }
       }
     );
   }
@@ -232,10 +249,10 @@ function activate(context) {
     var request = ++generation;
     var delays  = [0, 200, 600, 1400, 3000];
     for (var i = 0; i < delays.length; i++) {
-      (function (d) {
-        var t = setTimeout(function () { refreshSymbols(request); }, d);
+      (function (d, idx) {
+        var t = setTimeout(function () { refreshSymbols(request, idx); }, d);
         retryTimers.push(t);
-      })(delays[i]);
+      })(delays[i], i);
     }
   }
 
